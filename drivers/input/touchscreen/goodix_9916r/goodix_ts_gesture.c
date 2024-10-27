@@ -36,8 +36,9 @@
 #define GSX_GESTURE_TYPE_LEN	32
 #define TYPE_B_PROTOCOL
 
+#ifdef GOODIX_FOD_AREA_REPORT
 static int  FP_Event_Gesture;
-
+#endif
 
 
 /*
@@ -239,8 +240,8 @@ static int gsx_gesture_ist(struct goodix_ts_core *cd,
 #ifdef GOODIX_FOD_AREA_REPORT
 	unsigned int fodx, fody, fod_id;
 	unsigned int overlay_area;
-#endif
 	u8 gesture_data[32];
+#endif
 
 	if (atomic_read(&cd->suspended) == 0)
 		return EVT_CONTINUE;
@@ -259,10 +260,10 @@ static int gsx_gesture_ist(struct goodix_ts_core *cd,
 		goto re_send_ges_cmd;
 	}
 
+#ifdef GOODIX_FOD_AREA_REPORT
 	memcpy(gesture_data, gs_event.touch_data.tmp_data, 32*sizeof(u8));
 	if ((gesture_data[0] & 0x08)  != 0)
 		FP_Event_Gesture = 1;
-#ifdef GOODIX_FOD_AREA_REPORT
 	fod_id = gesture_data[17];
 	if (cd->fod_status && (FP_Event_Gesture == 1) &&
 		(gs_event.gesture_type == 0x46) &&
