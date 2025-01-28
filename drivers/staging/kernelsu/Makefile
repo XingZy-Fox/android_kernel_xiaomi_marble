@@ -16,7 +16,7 @@ ccflags-y += -I$(objtree)/security/selinux -include $(srctree)/include/uapi/asm-
 
 obj-$(CONFIG_KSU) += kernelsu.o
 
-KSU_GIT_VERSION := 1786
+KSU_GIT_VERSION := 1818
 # ksu_version: major * 10000 + git version + 200 for historical reasons
 $(eval KSU_VERSION=$(shell expr 10000 + $(KSU_GIT_VERSION) + 200))
 # $(info -- KernelSU version: $(KSU_VERSION))
@@ -33,6 +33,16 @@ endif
 ifdef KSU_MANAGER_PACKAGE
 ccflags-y += -DKSU_MANAGER_PACKAGE=\"$(KSU_MANAGER_PACKAGE)\"
 $(info -- KernelSU Manager package name: $(KSU_MANAGER_PACKAGE))
+endif
+
+ifeq ($(CONFIG_KSU_MANUAL_HOOK),y)
+ifeq ($(CONFIG_KSU),m)
+$(error CONFIG_KSU_MANUAL_HOOK cannot be enabled when compiling KernelSU as LKM!)
+endif
+else
+ifeq ($(CONFIG_KPROBES),y)
+ccflags-y += -DKSU_HOOK_WITH_KPROBES
+endif
 endif
 
 # $(info -- KernelSU Manager signature size: $(KSU_EXPECTED_SIZE))

@@ -4,18 +4,32 @@
 #include <uapi/linux/android/binder.h>
 #include <uapi/linux/sched/types.h>
 #include <linux/sched/prio.h>
+#include <linux/namei.h>
 #include <../../android/binder_internal.h>
 #include <../../../kernel/sched/sched.h>
 #include <linux/string.h>
 
+#ifdef CONFIG_BINDER_PRIO_DEBUG
+#include <linux/module.h>
+
+static uint __read_mostly debug = 0;
+module_param(debug, uint, 0644);
+#endif
+
+static bool __read_mostly is_miui_rom = false;
+static const char *miui_framework = "/system/framework/MiuiBooster.jar";
+
 static const char *task_name[] = {
-	"com.miui.home",
-	".globallauncher",  // com.mi.android.globallauncher
 	"droid.launcher3",  // com.android.launcher3
 	"ndroid.systemui",  // com.android.systemui
 	// "surfaceflinger",
-	"com.tencent.mm",
-	"egram.messenger",  // org.telegram.messenger
+	"cameraserver",
+};
+
+static const char *task_name_miui[] = {
+	"com.miui.home",
+	".globallauncher",  // com.mi.android.globallauncher
+	"rsonalassistant",  // com.miui.personalassistant
 };
 
 static int to_userspace_prio(int policy, int kernel_priority) {
@@ -29,15 +43,54 @@ static bool set_binder_rt_task(struct binder_transaction *t) {
 	int i;
 
 	if (t && t->from && t->from->task && t->to_proc && t->to_proc->tsk && (!(t->flags & TF_ONE_WAY)) &&
-	    rt_policy(t->from->task->policy) && (t->from->task->pid == t->from->task->tgid)) {
-		for (i = 0; i < ARRAY_SIZE(task_name); i++) {
-			if (strncmp(t->from->task->comm, task_name[i], strlen(task_name[i])) == 0) {
-				return true;
+	    rt_policy(t->from->task->policy)) {
+		#define from_task_comm    t->from->task->comm
+		#define from_task_gl_comm t->from->task->group_leader->comm
+
+		if (is_miui_rom) {
+			if (!strncmp(from_task_gl_comm, "com.miui.home", strlen("com.miui.home")) &&
+			    !strncmp(from_task_comm, "RenderThread", strlen("RenderThread")) &&
+			    !strncmp(t->to_proc->tsk->comm, "surfaceflinger", strlen("surfaceflinger")))
+				goto yes_and_exit;
+			if (!strncmp(from_task_gl_comm, "surfaceflinger", strlen("surfaceflinger")) &&
+			    !strncmp(from_task_comm, "passBlur", strlen("passBlur")))
+				goto yes_and_exit;
+		}
+		if (!strncmp(from_task_gl_comm, "cameraserver", strlen("cameraserver")) &&
+		    !strncmp(from_task_comm, "C3Dev-", strlen("C3Dev-")) &&
+		    strstr(from_task_comm, "-ReqQ"))
+			goto yes_and_exit;
+		/*
+		 * `wmshell.main` and `wmshell.splashscreen` threads are defined in
+		 * `com.android.wm.shell.dagger.WMShellConcurrencyModule` in the Android source code.
+		 */
+		if (!strncmp(from_task_comm, "wmshell.main", strlen("wmshell.main")) ||
+		    !strncmp(from_task_comm, "ll.splashscreen", strlen("ll.splashscreen")))
+			goto yes_and_exit;
+		if (t->from->task->pid == t->from->task->tgid) {
+			for (i = 0; i < ARRAY_SIZE(task_name); i++)
+				if (strncmp(from_task_comm, task_name[i], strlen(task_name[i])) == 0)
+					goto yes_and_exit;
+			if (is_miui_rom) {
+				for (i = 0; i < ARRAY_SIZE(task_name_miui); i++)
+					if (strncmp(from_task_comm, task_name_miui[i], strlen(task_name_miui[i])) == 0)
+						goto yes_and_exit;
 			}
 		}
-		if (!strncmp(t->from->task->group_leader->comm, "surfaceflinger", strlen("surfaceflinger")) &&
-		    !strncmp(t->from->task->comm, "passBlur", strlen("passBlur")))
-			return true;
+
+		return false;
+
+yes_and_exit:
+#ifdef CONFIG_BINDER_PRIO_DEBUG
+		if (debug)
+			pr_info("binder_prio: %s: tid: %d, from_task: %s, from_task_gl: %s; to_task: %s\n",
+				__func__, t->from->task->pid,
+				t->from->task->comm, t->from->task->group_leader->comm, t->to_proc->tsk->comm);
+#endif
+		return true;
+
+		#undef from_task_comm
+		#undef from_task_gl_comm
 	}
 	return false;
 }
@@ -82,7 +135,19 @@ static void extend_skip_binder_thread_priority_from_rt_to_normal_handler(void *d
 
 int __init binder_prio_init(void)
 {
+    struct path path;
+
     pr_info("binder_prio: module init!");
+
+    if (kern_path(miui_framework, LOOKUP_FOLLOW, &path) == 0) {
+        pr_info("binder_prio: Miui/HyperOS rom detected!\n");
+        is_miui_rom = true;
+    } else {
+        pr_info("binder_prio: AOSP rom detected!\n");
+        is_miui_rom = false;
+    }
+    path_put(&path);
+
     register_trace_android_vh_binder_set_priority(extend_surfacefinger_binder_set_priority_handler, NULL);
     register_trace_android_vh_binder_trans(extend_surfacefinger_binder_trans_handler, NULL);
     register_trace_android_vh_binder_priority_skip(extend_skip_binder_thread_priority_from_rt_to_normal_handler, NULL);

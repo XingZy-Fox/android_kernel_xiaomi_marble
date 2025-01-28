@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 5
 PATCHLEVEL = 10
-SUBLEVEL = 226
+SUBLEVEL = 233
 EXTRAVERSION =
 NAME = Dare mighty things
 
@@ -1278,7 +1278,9 @@ endif
 # Devicetree files
 ifeq ($(KBUILD_EXTMOD),)
 ifneq ($(wildcard $(srctree)/arch/$(SRCARCH)/boot/dts/),)
-dtstree := arch/$(SRCARCH)/boot/dts
+# ANDROID: allow this to be overridden by the build environment. This allows
+# one to compile a device tree that is located out-of-tree.
+dtstree ?= arch/$(SRCARCH)/boot/dts
 endif
 
 else # KBUILD_EXTMOD
